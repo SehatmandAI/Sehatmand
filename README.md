@@ -1,9 +1,11 @@
 <div align="center">
-<img src="https://avatars.githubusercontent.com/u/295149021?s=200&v=4" width="160" height="160" style="border-radius: 50%; object-fit: cover;">
-<br><br>
+
+   ![avatar](https://images.weserv.nl/?url=avatars.githubusercontent.com/u/295149021?s=200&v=4&h=250&w=250&fit=cover&mask=circle&maxage=7d)
+
 <small><i>Vibecoded via antigravity</i></small>
 <br>
 <small><i>Built for the Atomcamp Hackathon</i></small>
+
 </div>
 
 # Sehatmand 🩺
