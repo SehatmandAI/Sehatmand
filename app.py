@@ -9,11 +9,11 @@ load_dotenv()
 try:
     from agents import HealthCoordinator
     from knowledge_base import TRIAGE_KNOWLEDGE, check_ollama_status, get_db_document_count
-    from knowledge_update import update_knowledge_base
+    from knowledge_update import update_knowledge_base, parse_conditions_from_pdf
 except ImportError:
     from sehatmand.agents import HealthCoordinator
     from sehatmand.knowledge_base import TRIAGE_KNOWLEDGE, check_ollama_status, get_db_document_count
-    from sehatmand.knowledge_update import update_knowledge_base
+    from sehatmand.knowledge_update import update_knowledge_base, parse_conditions_from_pdf
 
 # Page Configuration
 st.set_page_config(
@@ -251,20 +251,48 @@ with st.sidebar.expander("Developer Portal"):
                     target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guidelines.txt")
                 chunks_added = update_knowledge_base(file_path=target_path, status_callback=ui_status_callback)
                 st.success(f"✅ {chunks_added} chunks added to ChromaDB.")
+                # Also parse conditions from the PDF
+                if uploaded_file is not None:
+                    status_placeholder.info("Extracting conditions from PDF...")
+                    parsed = parse_conditions_from_pdf(target_path, status_callback=ui_status_callback)
+                    if parsed:
+                        st.session_state["parsed_conditions"] = parsed
+                        status_placeholder.success(f"✅ Extracted {len(parsed)} conditions from PDF!")
+                    else:
+                        status_placeholder.warning("No conditions found in PDF. Falling back to defaults.")
             except Exception as e:
                 st.error(f"Error updating database: {e}")
-    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
+    # Reset to default button (only shown when parsed conditions exist)
+    if st.session_state.get("parsed_conditions"):
+        def reset_conditions():
+            del st.session_state["parsed_conditions"]
+            st.rerun()
+        if st.button("Reset to Default Conditions", use_container_width=True, type="secondary"):
+            reset_conditions()
 
 # --- Local Triage Conditions (always visible) ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("Local Triage Conditions")
-triage_list = list(TRIAGE_KNOWLEDGE.keys())
-selected_triage = st.sidebar.selectbox("Inspect:", triage_list)
-if selected_triage:
-    td = TRIAGE_KNOWLEDGE[selected_triage]
-    st.sidebar.markdown(f"**Symptoms**: {', '.join(td['symptoms'])}")
-    st.sidebar.markdown(f"**Urgency**: {td['urgency']}")
-    st.sidebar.markdown(f"**Action**: {td['recommended_action']}")
+
+# Use parsed conditions if available, otherwise fall back to TRIAGE_KNOWLEDGE
+parsed_conditions = st.session_state.get("parsed_conditions", None)
+if parsed_conditions and isinstance(parsed_conditions, list) and len(parsed_conditions) > 0:
+    condition_list = [c.get("condition_name", "Unknown") for c in parsed_conditions]
+    selected_triage = st.sidebar.selectbox("Inspect:", ["(Default Conditions)"] + condition_list)
+    if selected_triage and selected_triage != "(Default Conditions)":
+        matched = next((c for c in parsed_conditions if c.get("condition_name") == selected_triage), None)
+        if matched:
+            st.sidebar.markdown(f"**Symptoms**: {', '.join(matched.get('symptoms', []))}")
+            st.sidebar.markdown(f"**Urgency**: {matched.get('urgency', 'N/A')}")
+            st.sidebar.markdown(f"**Action**: {matched.get('recommended_action', 'N/A')}")
+else:
+    triage_list = list(TRIAGE_KNOWLEDGE.keys())
+    selected_triage = st.sidebar.selectbox("Inspect:", triage_list)
+    if selected_triage:
+        td = TRIAGE_KNOWLEDGE[selected_triage]
+        st.sidebar.markdown(f"**Symptoms**: {', '.join(td['symptoms'])}")
+        st.sidebar.markdown(f"**Urgency**: {td['urgency']}")
+        st.sidebar.markdown(f"**Action**: {td['recommended_action']}")
 
 # --- RAG Database Control Panel (public-facing, simplified) ---
 st.sidebar.markdown("---")
