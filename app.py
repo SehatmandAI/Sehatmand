@@ -17,7 +17,7 @@ except ImportError:
 
 # Page Configuration
 st.set_page_config(
-    page_title="Sehatmand 🩺 | Multiagent Triage & Advisor",
+    page_title="Sehatmand 🩺 | Multiagent Triage & Advisor [DEMO]",
     page_icon="🩺",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -226,11 +226,8 @@ db_count = get_db_document_count()
 st.sidebar.markdown("🧠 Embeddings: **Sentence-Transformers** (`all-MiniLM-L6-v2`)")
 st.sidebar.markdown(f"📄 Documents in DB: **{db_count}**")
 
-# PDF File Uploader
+# PDF File Uploader (upload only — no local path input)
 uploaded_file = st.sidebar.file_uploader("Upload Guidelines PDF", type=["pdf"])
-
-# Input for the PDF file path (fallback)
-pdf_path_input = st.sidebar.text_input("Or Local File Path", value="guidelines.pdf", help="Provide the path to a local document or PDF to ingest.")
 
 if st.sidebar.button("🔄 Sync Database"):
     status_placeholder = st.sidebar.empty()
@@ -240,15 +237,16 @@ if st.sidebar.button("🔄 Sync Database"):
     with st.spinner("Processing document and generating embeddings..."):
         try:
             if uploaded_file is not None:
-                # Save uploaded file locally
+                # Save uploaded file to a writable temp location
                 target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_guidelines.pdf")
                 with open(target_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
             else:
-                target_path = pdf_path_input
+                # No file uploaded — generate mock guidelines document
+                target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guidelines.txt")
                 
             chunks_added = update_knowledge_base(file_path=target_path, status_callback=ui_status_callback)
-            st.sidebar.success(f"Success! {chunks_added} chunks added to ChromaDB.")
+            st.sidebar.success(f"✅ {chunks_added} chunks added to ChromaDB.")
         except Exception as e:
             st.sidebar.error(f"Error updating database: {e}")
 
@@ -269,7 +267,7 @@ st.sidebar.caption("Sehatmand multiagent system v1.0. Designed for hackathons an
 # Translation dictionary
 TRANSLATIONS = {
     "English": {
-        "title": "🩺 Sehatmand Triage & Advisor",
+        "title": "🩺 Sehatmand Triage & Advisor [DEMO]",
         "subtitle": "A multiagent cooperative healthcare assessment tool using local triage rules and WHO/MOH guidelines.",
         "describe_symptoms": "Describe Your Symptoms",
         "explain_feeling": "Please explain how you are feeling (e.g. onset, duration, and specific symptoms):",
@@ -301,7 +299,7 @@ TRANSLATIONS = {
         "thought_process": "Thought Process"
     },
     "Urdu": {
-        "title": "🩺 صحت مند | ٹریج اور ایڈوائزر",
+        "title": "🩺 صحت مند | ٹریج اور ایڈوائزر [DEMO]",
         "subtitle": "مقامی ٹریج قواعد اور ڈبلیو ایچ او/ایم او ایچ رہنما خطوط کا استعمال کرتے ہوئے ایک کثیر ایجنٹ کوآپریٹو ہیلتھ کیئر تشخیص ٹول۔",
         "describe_symptoms": "اپنی علامات بیان کریں",
         "explain_feeling": "براہ کرم وضاحت کریں کہ آپ کیسا محسوس کر رہے ہیں (مثال کے طور پر شروعات، دورانیہ اور مخصوص علامات):",
