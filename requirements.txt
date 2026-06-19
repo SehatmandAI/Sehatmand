@@ -7,3 +7,4 @@ pypdf>=4.0.0
 requests>=2.30.0
 openai>=1.0.0
 sentence-transformers>=3.0.0
+torchvision>=0.16.0
