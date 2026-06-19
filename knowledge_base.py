@@ -1,6 +1,6 @@
 import os
-import numpy as np
-import google.generativeai as genai
+import requests
+import chromadb
 
 # 6 common conditions in triage dictionary
 TRIAGE_KNOWLEDGE = {
@@ -42,7 +42,7 @@ TRIAGE_KNOWLEDGE = {
     }
 }
 
-# Detailed guidelines simulating a health guidelines database for RAG
+# Detailed guidelines simulating a health guidelines database for fallback keyword matching
 MOH_WHO_GUIDELINES = [
     {
         "source": "WHO Guidelines on Influenza Prevention (2024)",
@@ -74,6 +74,28 @@ MOH_WHO_GUIDELINES = [
     }
 ]
 
+# Path to database (use writable /tmp/chroma_db if available, e.g. on Streamlit Cloud)
+if os.path.exists("/tmp") and os.access("/tmp", os.W_OK):
+    DB_PATH = "/tmp/chroma_db"
+else:
+    CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+    DB_PATH = os.path.join(CURRENT_DIR, "chroma_db")
+COLLECTION_NAME = "health_guidelines"
+
+def check_ollama_status(host: str = "http://localhost:11434") -> bool:
+    """Always returns True since Sentence-Transformers is used as the local engine (no Ollama server dependency)."""
+    return True
+
+_embedding_model = None
+
+def get_local_embedding(text: str) -> list:
+    """Fetches text embedding using local sentence-transformers all-MiniLM-L6-v2 model."""
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedding_model.encode(text).tolist()
+
 def get_knowledge_as_text() -> str:
     """Formats the TRIAGE_KNOWLEDGE dictionary into a clean markdown/text format for agent retrieval."""
     text_parts = ["# TRIAGE KNOWLEDGE DATABASE\n"]
@@ -86,6 +108,17 @@ def get_knowledge_as_text() -> str:
         text_parts.append("")
     return "\n".join(text_parts)
 
+def get_db_document_count() -> int:
+    """Returns the number of documents currently stored in ChromaDB."""
+    try:
+        if not os.path.exists(DB_PATH):
+            return 0
+        chroma_client = chromadb.PersistentClient(path=DB_PATH)
+        collection = chroma_client.get_collection(name=COLLECTION_NAME)
+        return collection.count()
+    except Exception:
+        return 0
+
 def simple_keyword_overlap(query: str, document: str) -> float:
     """Calculates a simple word-overlap Jaccard score between query and document."""
     query_words = set(query.lower().split())
@@ -96,102 +129,93 @@ def simple_keyword_overlap(query: str, document: str) -> float:
     return len(intersection) / len(query_words)
 
 class RAGSystem:
-    """A lightweight RAG system that uses Gemini Embeddings or falls back to word overlap."""
-    def __init__(self, guidelines=MOH_WHO_GUIDELINES, api_key=None):
-        self.guidelines = guidelines
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.embeddings = []
+    """A RAG system querying ChromaDB locally, calling local sentence-transformers all-MiniLM-L6-v2 embeddings model."""
+    def __init__(self, model_name="all-MiniLM-L6-v2", host=None):
+        self.model_name = model_name
+        self.host = host
+        self.chroma_client = None
+        self.collection = None
         self.use_fallback = True
+
+        db_doc_count = get_db_document_count()
         
-        if self.api_key and self.api_key != "your_gemini_api_key_here":
+        if db_doc_count > 0:
             try:
-                genai.configure(api_key=self.api_key)
-                self._generate_database_embeddings()
+                self.chroma_client = chromadb.PersistentClient(path=DB_PATH)
+                self.collection = self.chroma_client.get_collection(name=COLLECTION_NAME)
                 self.use_fallback = False
             except Exception as e:
-                print(f"Warning: RAG initialization with Gemini failed. Falling back to keyword matching. Error: {e}")
+                print(f"Warning: RAG initialization with ChromaDB failed. Falling back. Error: {e}")
                 self.use_fallback = True
         else:
-            print("Warning: GEMINI_API_KEY not found or default placeholder. Using keyword matching fallback.")
+            print("Warning: RAG system is running in offline keyword overlap fallback. (DB count is 0)")
             self.use_fallback = True
 
-    def _generate_database_embeddings(self):
-        self.embeddings = []
-        for doc in self.guidelines:
-            text = f"{doc['source']}\n{doc['content']}"
-            result = genai.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_document"
-            )
-            self.embeddings.append(result['embedding'])
-        self.embeddings = np.array(self.embeddings)
-
-    def query(self, query_text: str, top_k: int = 2):
+    def query(self, query_text: str, top_k: int = 2) -> list:
         if not query_text:
             return []
             
         if self.use_fallback:
+            # Fall back to Jaccard overlap on base mock guidelines
             scores = []
-            for doc in self.guidelines:
+            for doc in MOH_WHO_GUIDELINES:
                 text = f"{doc['source']} {doc['content']}"
                 score = simple_keyword_overlap(query_text, text)
                 scores.append(score)
             
-            top_indices = np.argsort(scores)[::-1][:top_k]
+            top_indices = sorted(range(len(scores)), key=lambda k: scores[k], reverse=True)[:top_k]
             results = []
             for idx in top_indices:
-                if scores[idx] > 0:
-                    results.append({
-                        "doc": self.guidelines[idx],
-                        "score": float(scores[idx]),
-                        "method": "Keyword Overlap"
-                    })
-            
-            # If no matches found, return default guidelines
-            if not results:
-                for idx in range(min(top_k, len(self.guidelines))):
-                    results.append({
-                        "doc": self.guidelines[idx],
-                        "score": 0.0,
-                        "method": "Default Fallback"
-                    })
+                results.append({
+                    "doc": MOH_WHO_GUIDELINES[idx],
+                    "score": float(scores[idx]),
+                    "method": "Keyword Overlap (Local Fallback)"
+                })
             return results
         else:
             try:
-                genai.configure(api_key=self.api_key)
-                query_result = genai.embed_content(
-                    model="models/text-embedding-004",
-                    content=query_text,
-                    task_type="retrieval_query"
+                # 1. Fetch embedding for query using sentence-transformers
+                query_vector = get_local_embedding(query_text)
+                
+                # 2. Query ChromaDB
+                res = self.collection.query(
+                    query_embeddings=[query_vector],
+                    n_results=top_k
                 )
-                query_vector = np.array(query_result['embedding'])
                 
-                dots = np.dot(self.embeddings, query_vector)
-                norms_docs = np.linalg.norm(self.embeddings, axis=1)
-                norm_query = np.linalg.norm(query_vector)
-                similarities = dots / (norms_docs * norm_query + 1e-9)
-                
-                top_indices = np.argsort(similarities)[::-1][:top_k]
                 results = []
-                for idx in top_indices:
-                    results.append({
-                        "doc": self.guidelines[idx],
-                        "score": float(similarities[idx]),
-                        "method": "Gemini Embeddings"
-                    })
+                # Parse Chroma response
+                if res and "documents" in res and len(res["documents"]) > 0:
+                    documents = res["documents"][0]
+                    metadatas = res["metadatas"][0] if "metadatas" in res else []
+                    distances = res["distances"][0] if "distances" in res else []
+                    
+                    for idx, doc in enumerate(documents):
+                        source = metadatas[idx].get("source_file", "Ingested Document") if idx < len(metadatas) else "ChromaDB"
+                        dist = distances[idx] if idx < len(distances) else 0.0
+                        # Convert distance to similarity score
+                        score = 1.0 / (1.0 + dist)
+                        
+                        results.append({
+                            "doc": {
+                                "source": f"{source} (Chunk {metadatas[idx].get('chunk_index', idx)})",
+                                "content": doc
+                            },
+                            "score": float(score),
+                            "method": "Sentence-Transformers + ChromaDB"
+                        })
                 return results
             except Exception as e:
-                print(f"Embedding query failed: {e}. Falling back...")
-                # Run keyword matching fallback
+                print(f"RAG query failed: {e}. Running keyword fallback...")
+                # Immediate fallback
                 scores = []
-                for doc in self.guidelines:
+                for doc in MOH_WHO_GUIDELINES:
                     text = f"{doc['source']} {doc['content']}"
                     score = simple_keyword_overlap(query_text, text)
                     scores.append(score)
-                top_indices = np.argsort(scores)[::-1][:top_k]
+                top_indices = sorted(range(len(scores)), key=lambda k: scores[k], reverse=True)[:top_k]
                 return [{
-                    "doc": self.guidelines[idx],
+                    "doc": MOH_WHO_GUIDELINES[idx],
                     "score": float(scores[idx]),
-                    "method": "Keyword Overlap (Fallback)"
+                    "method": "Keyword Overlap (RAG Fallback)"
                 } for idx in top_indices]
