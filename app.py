@@ -156,11 +156,24 @@ st.markdown("""
     .actions-card { border-left: 5px solid #14b8a6; }
     .ul-styled { padding-left: 20px; margin: 0; color: #cbd5e1; font-size: 0.95rem; line-height: 1.6; }
     .ul-styled li { margin-bottom: 6px; }
+    
+    /* Developer portal button styling */
+    .dev-portal-btn {
+        background-color: #334155 !important;
+        color: #e2e8f0 !important;
+        border: 1px solid #475569 !important;
+        border-radius: 8px !important;
+        font-size: 0.9rem !important;
+        padding: 8px 16px !important;
+    }
+    .dev-portal-btn:hover {
+        background-color: #475569 !important;
+        color: #f8fafc !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # Sidebar Configuration
-st.sidebar.image("https://img.icons8.com/external-flatart-icons-flat-flatarticons/128/external-medical-medical-health-flatart-icons-flat-flatarticons.png", width=80)
 st.sidebar.title("Configuration")
 
 def get_api_key(name: str, default: str = "") -> str:
@@ -202,67 +215,66 @@ else:
     coordinator = HealthCoordinator()
     is_llm_running = False
 
-# Sidebar LLM status display
-st.sidebar.subheader("LLM Service Status")
+# --- Developer Portal Panel (collapsible) ---
+with st.sidebar.expander("Developer Portal"):
+    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
+    # LLM status
+    st.subheader("LLM Service Status")
+    if is_llm_running:
+        st.markdown('🌐 Gemini API Key 1: **Active** 🟢<br><span style="color: #10b981; font-size: 0.85rem; font-weight: 600;">Model: gemini-2.5-flash</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('🌐 Gemini API Key 1: **Inactive** 🟠<br><span style="color: #f59e0b; font-size: 0.85rem; font-weight: 600;">Local fallback active (no-key)</span>', unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
+    if has_gemini_2:
+        st.markdown('🧠 Gemini API Key 2: **Active** 🟢<br><span style="color: #10b981; font-size: 0.85rem; font-weight: 600;">Model: gemini-2.5-flash (Agent 4)</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('🧠 Gemini API Key 2: **Inactive** 🔴<br><span style="color: #ef4444; font-size: 0.85rem; font-weight: 600;">Using Key 1 fallback or Mock</span>', unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
+    st.markdown(f"**Embedding Model**: `all-MiniLM-L6-v2` (Sentence-Transformers)<br><span style='color: #94a3b8; font-size: 0.8rem;'>Vector dimension: 384</span>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
+    # RAG Database Control
+    st.subheader("📚 Knowledge Base Control")
+    db_count = get_db_document_count()
+    st.markdown(f"📄 Documents in DB: **{db_count}**")
+    uploaded_file = st.file_uploader("Upload Guidelines PDF", type=["pdf"], key="dev_pdf_upload")
+    if st.button("🔄 Sync Database", use_container_width=True):
+        status_placeholder = st.empty()
+        def ui_status_callback(msg):
+            status_placeholder.info(msg)
+        with st.spinner("Processing document and generating embeddings..."):
+            try:
+                if uploaded_file is not None:
+                    target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_guidelines.pdf")
+                    with open(target_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                else:
+                    target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guidelines.txt")
+                chunks_added = update_knowledge_base(file_path=target_path, status_callback=ui_status_callback)
+                st.success(f"✅ {chunks_added} chunks added to ChromaDB.")
+            except Exception as e:
+                st.error(f"Error updating database: {e}")
+    st.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
 
-if is_llm_running:
-    st.sidebar.markdown('🌐 Gemini API Key 1: **Active** 🟢<br><span style="color: #10b981; font-size: 0.85rem; font-weight: 600;">Model: gemini-2.5-flash</span>', unsafe_allow_html=True)
-else:
-    st.sidebar.markdown('🌐 Gemini API Key 1: **Inactive** 🟠<br><span style="color: #f59e0b; font-size: 0.85rem; font-weight: 600;">Local fallback active (no-key)</span>', unsafe_allow_html=True)
-
-st.sidebar.markdown("<div style='margin-bottom: 8px;'></div>", unsafe_allow_html=True)
-
-if has_gemini_2:
-    st.sidebar.markdown('🧠 Gemini API Key 2: **Active** 🟢<br><span style="color: #10b981; font-size: 0.85rem; font-weight: 600;">Model: gemini-2.5-flash (Agent 4)</span>', unsafe_allow_html=True)
-else:
-    st.sidebar.markdown('🧠 Gemini API Key 2: **Inactive** 🔴<br><span style="color: #ef4444; font-size: 0.85rem; font-weight: 600;">Using Key 1 fallback or Mock</span>', unsafe_allow_html=True)
-
-
-# --- RAG Database Control Panel ---
-st.sidebar.markdown("---")
-st.sidebar.subheader("📚 Knowledge Base Control")
-
-db_count = get_db_document_count()
-st.sidebar.markdown("🧠 Embeddings: **Sentence-Transformers** (`all-MiniLM-L6-v2`)")
-st.sidebar.markdown(f"📄 Documents in DB: **{db_count}**")
-
-# PDF File Uploader (upload only — no local path input)
-uploaded_file = st.sidebar.file_uploader("Upload Guidelines PDF", type=["pdf"])
-
-if st.sidebar.button("🔄 Sync Database"):
-    status_placeholder = st.sidebar.empty()
-    def ui_status_callback(msg):
-        status_placeholder.info(msg)
-        
-    with st.spinner("Processing document and generating embeddings..."):
-        try:
-            if uploaded_file is not None:
-                # Save uploaded file to a writable temp location
-                target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploaded_guidelines.pdf")
-                with open(target_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-            else:
-                # No file uploaded — generate mock guidelines document
-                target_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guidelines.txt")
-                
-            chunks_added = update_knowledge_base(file_path=target_path, status_callback=ui_status_callback)
-            st.sidebar.success(f"✅ {chunks_added} chunks added to ChromaDB.")
-        except Exception as e:
-            st.sidebar.error(f"Error updating database: {e}")
-
-# Database inspector in Sidebar
+# --- Local Triage Conditions (always visible) ---
 st.sidebar.markdown("---")
 st.sidebar.subheader("Local Triage Conditions")
-conditions_list = list(TRIAGE_KNOWLEDGE.keys())
-selected_condition = st.sidebar.selectbox("Inspect Triage Rules:", conditions_list)
-if selected_condition:
-    cond_data = TRIAGE_KNOWLEDGE[selected_condition]
-    st.sidebar.markdown(f"**Symptoms**: {', '.join(cond_data['symptoms'])}")
-    st.sidebar.markdown(f"**Urgency**: {cond_data['urgency']}")
-    st.sidebar.markdown(f"**Action**: {cond_data['recommended_action']}")
+triage_list = list(TRIAGE_KNOWLEDGE.keys())
+selected_triage = st.sidebar.selectbox("Inspect:", triage_list)
+if selected_triage:
+    td = TRIAGE_KNOWLEDGE[selected_triage]
+    st.sidebar.markdown(f"**Symptoms**: {', '.join(td['symptoms'])}")
+    st.sidebar.markdown(f"**Urgency**: {td['urgency']}")
+    st.sidebar.markdown(f"**Action**: {td['recommended_action']}")
 
+# --- RAG Database Control Panel (public-facing, simplified) ---
 st.sidebar.markdown("---")
-st.sidebar.caption("Sehatmand multiagent system v1.0. Designed for hackathons and demonstration purposes.")
+st.sidebar.subheader("📚 Knowledge Base")
+db_count = get_db_document_count()
+st.sidebar.markdown(f"📄 Documents in DB: **{db_count}**")
+
+# --- Footer ---
+st.sidebar.markdown("---")
+st.sidebar.caption("Sehatmand v1.0 — Multiagent Health Triage")
 
 # Translation dictionary
 TRANSLATIONS = {
