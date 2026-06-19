@@ -40,3 +40,10 @@ venv.bak/
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# Database and Guidelines documents
+guidelines.pdf
+guidelines.txt
+uploaded_guidelines.pdf
+uploaded_guidelines.pdf
+commit_message.txt
